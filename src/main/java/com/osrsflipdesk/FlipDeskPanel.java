@@ -2,9 +2,11 @@ package com.osrsflipdesk;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.GridLayout;
+import java.awt.Window;
 import java.text.NumberFormat;
 import java.text.SimpleDateFormat;
 import java.util.Collections;
@@ -23,6 +25,7 @@ import javax.swing.JScrollPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTextField;
 import javax.swing.ScrollPaneConstants;
+import javax.swing.SwingUtilities;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.PluginPanel;
 
@@ -61,10 +64,15 @@ final class FlipDeskPanel extends PluginPanel
     @Inject
     FlipDeskPanel(FlipDeskPlugin plugin, FlipDeskConfig config)
     {
+        // false = no PluginPanel outer JScrollPane. Nested scroll panes eat mouse-wheel
+        // events (scrollbar still works; wheel does nothing). Each tab has its own scroller.
+        super(false);
+
         this.plugin = plugin;
         this.config = config;
 
         setLayout(new BorderLayout(0, 8));
+        setBackground(ColorScheme.DARK_GRAY_COLOR);
         setBorder(BorderFactory.createEmptyBorder(4, 0, 0, 0));
 
         JPanel header = new JPanel();
@@ -141,7 +149,7 @@ final class FlipDeskPanel extends PluginPanel
         clearActiveButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, clearActiveButton.getPreferredSize().height));
         clearActiveButton.addActionListener(e -> {
             int choice = JOptionPane.showConfirmDialog(
-                this,
+                dialogParent(),
                 "Remove all active flips? This does not change total realized profit.",
                 "Clear active flips",
                 JOptionPane.YES_NO_OPTION);
@@ -306,7 +314,7 @@ final class FlipDeskPanel extends PluginPanel
         final String itemName = p.itemName;
         removeButton.addActionListener(e -> {
             int choice = JOptionPane.showConfirmDialog(
-                this,
+                dialogParent(),
                 "Remove \"" + itemName + "\" from active flips?",
                 "Remove active flip",
                 JOptionPane.YES_NO_OPTION);
@@ -377,6 +385,16 @@ final class FlipDeskPanel extends PluginPanel
         return card;
     }
 
+    /**
+     * Parent confirm dialogs to the RuneLite window, not the narrow sidebar panel.
+     * Sidebar parenting places the dialog near the panel edge and often clips Yes/No off-screen.
+     */
+    private Component dialogParent()
+    {
+        Window window = SwingUtilities.getWindowAncestor(this);
+        return window != null ? window : this;
+    }
+
     private static JScrollPane wrapScroll(JPanel content)
     {
         // Keep content top-aligned so BoxLayout children don't stretch to fill the viewport.
@@ -386,9 +404,13 @@ final class FlipDeskPanel extends PluginPanel
 
         JScrollPane scroll = new JScrollPane(northWrap);
         scroll.setBorder(BorderFactory.createEmptyBorder());
+        scroll.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        scroll.getViewport().setBackground(ColorScheme.DARK_GRAY_COLOR);
         scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
         scroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
-        scroll.getVerticalScrollBar().setUnitIncrement(16);
+        scroll.setWheelScrollingEnabled(true);
+        scroll.getVerticalScrollBar().setUnitIncrement(24);
+        scroll.getVerticalScrollBar().setBlockIncrement(96);
         return scroll;
     }
 
