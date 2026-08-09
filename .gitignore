@@ -1,0 +1,14 @@
+.gradle/
+build/
+out/
+.idea/
+*.iml
+*.class
+dist/
+dist.zip
+*.exe
+net/
+.cursor/
+*.log
+.DS_Store
+Thumbs.db
