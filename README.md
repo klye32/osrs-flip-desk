@@ -42,3 +42,7 @@ There is no public GE order book. Prices are estimates from recent trades and yo
 ## License
 
 BSD 2-Clause. See [LICENSE](LICENSE).
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for release notes.
