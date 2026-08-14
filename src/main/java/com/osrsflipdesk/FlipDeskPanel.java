@@ -7,9 +7,14 @@ import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.GridLayout;
 import java.awt.Window;
+import java.nio.file.Path;
 import java.text.NumberFormat;
 import java.text.SimpleDateFormat;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
@@ -18,6 +23,8 @@ import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
+import javax.swing.JComboBox;
+import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
@@ -26,6 +33,7 @@ import javax.swing.JTabbedPane;
 import javax.swing.JTextField;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
+import javax.swing.filechooser.FileNameExtensionFilter;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.PluginPanel;
 
@@ -49,6 +57,16 @@ final class FlipDeskPanel extends PluginPanel
     private static final Font META_FONT = new Font(Font.SANS_SERIF, Font.PLAIN, 13);
     private static final Font BUTTON_FONT = new Font(Font.SANS_SERIF, Font.PLAIN, 13);
 
+    /**
+     * Text wrap width for sidebar content.
+     * PANEL_WIDTH includes the scrollbar gutter; cards also have horizontal insets.
+     */
+    private static final int WRAP_WIDTH = PluginPanel.PANEL_WIDTH
+        - PluginPanel.SCROLLBAR_WIDTH
+        - PluginPanel.BORDER_OFFSET * 2
+        - 24;
+    private static final int WRAP_WIDTH_NARROW = Math.max(100, WRAP_WIDTH - 78);
+
     private final FlipDeskPlugin plugin;
     private final FlipDeskConfig config;
 
@@ -60,6 +78,9 @@ final class FlipDeskPanel extends PluginPanel
     private final JPanel historyResults = verticalPanel();
     private final JLabel totalProfit = new JLabel("Total profit: 0 gp");
     private final JLabel activeSummary = new JLabel("No active flips");
+    private final JLabel historySummary = new JLabel("0 trades");
+    private final JComboBox<HistorySortMode> historySort = new JComboBox<>(HistorySortMode.values());
+    private List<PositionStore.Position> lastHistory = Collections.emptyList();
 
     @Inject
     FlipDeskPanel(FlipDeskPlugin plugin, FlipDeskConfig config)
@@ -86,8 +107,7 @@ final class FlipDeskPanel extends PluginPanel
         title.setAlignmentX(LEFT_ALIGNMENT);
         header.add(title);
 
-        JLabel subtitle = label("Set Flip strictness in settings if the list looks empty.", META_FONT, MUTED_TEXT);
-        header.add(subtitle);
+        header.add(label("Set Flip strictness in settings if the list looks empty.", META_FONT, MUTED_TEXT));
         header.add(Box.createRigidArea(new Dimension(0, 6)));
 
         JPanel money = new JPanel(new BorderLayout(6, 0));
@@ -95,8 +115,7 @@ final class FlipDeskPanel extends PluginPanel
         money.setAlignmentX(LEFT_ALIGNMENT);
         money.setMaximumSize(new Dimension(Integer.MAX_VALUE, 56));
 
-        JLabel gpLabel = label("GP on hand", BODY_BOLD, Color.WHITE);
-        money.add(gpLabel, BorderLayout.NORTH);
+        money.add(label("GP on hand", BODY_BOLD, Color.WHITE), BorderLayout.NORTH);
 
         gpField.setText(NUMBER.format(config.gpOnHand()));
         gpField.setFont(PRICE_FONT);
@@ -111,11 +130,13 @@ final class FlipDeskPanel extends PluginPanel
         totalProfit.setFont(HEADING_FONT);
         totalProfit.setForeground(PROFIT_GREEN);
         totalProfit.setAlignmentX(LEFT_ALIGNMENT);
+        setLabelText(totalProfit, "Total profit: 0 gp");
         header.add(totalProfit);
 
         activeSummary.setFont(BODY_FONT);
         activeSummary.setForeground(SECONDARY_TEXT);
         activeSummary.setAlignmentX(LEFT_ALIGNMENT);
+        setLabelText(activeSummary, "No active flips");
         header.add(activeSummary);
 
         gpField.addActionListener(e -> saveGpAndRefresh());
@@ -135,6 +156,7 @@ final class FlipDeskPanel extends PluginPanel
         status.setFont(BODY_FONT);
         status.setForeground(SECONDARY_TEXT);
         status.setAlignmentX(LEFT_ALIGNMENT);
+        setLabelText(status, "Loading market data…");
         recommendedTab.add(status);
         recommendedTab.add(Box.createRigidArea(new Dimension(0, 4)));
         recommendedTab.add(results);
@@ -165,6 +187,39 @@ final class FlipDeskPanel extends PluginPanel
         JPanel historyTab = new JPanel();
         historyTab.setLayout(new BoxLayout(historyTab, BoxLayout.Y_AXIS));
         historyTab.setBackground(ColorScheme.DARK_GRAY_COLOR);
+
+        historySummary.setFont(BODY_FONT);
+        historySummary.setForeground(SECONDARY_TEXT);
+        historySummary.setAlignmentX(LEFT_ALIGNMENT);
+        setLabelText(historySummary, "0 trades");
+        historyTab.add(historySummary);
+        historyTab.add(Box.createRigidArea(new Dimension(0, 4)));
+
+        JPanel historyControls = new JPanel(new BorderLayout(8, 0));
+        historyControls.setOpaque(false);
+        historyControls.setAlignmentX(LEFT_ALIGNMENT);
+        historyControls.add(plainLabel("Sort", META_FONT, MUTED_TEXT), BorderLayout.WEST);
+        historySort.setFont(BUTTON_FONT);
+        historySort.setSelectedItem(HistorySortMode.MOST_RECENT);
+        historySort.addActionListener(e -> renderHistory());
+        // Keep the combo readable in the narrow sidebar (don't force a 28px clip height).
+        Dimension sortSize = historySort.getPreferredSize();
+        historySort.setPreferredSize(new Dimension(Math.max(120, sortSize.width), sortSize.height));
+        historyControls.add(historySort, BorderLayout.CENTER);
+        historyControls.setMaximumSize(new Dimension(
+            Integer.MAX_VALUE,
+            Math.max(sortSize.height, historyControls.getPreferredSize().height) + 2));
+        historyTab.add(historyControls);
+        historyTab.add(Box.createRigidArea(new Dimension(0, 4)));
+
+        JButton exportHistoryButton = new JButton("Export CSV");
+        exportHistoryButton.setFont(BUTTON_FONT);
+        exportHistoryButton.setAlignmentX(LEFT_ALIGNMENT);
+        exportHistoryButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, exportHistoryButton.getPreferredSize().height));
+        exportHistoryButton.setToolTipText("Save completed flip history as a CSV you can open in Excel");
+        exportHistoryButton.addActionListener(e -> exportHistory());
+        historyTab.add(exportHistoryButton);
+        historyTab.add(Box.createRigidArea(new Dimension(0, 4)));
         historyTab.add(historyResults);
 
         tabs.addTab("Flips", wrapScroll(recommendedTab));
@@ -176,14 +231,14 @@ final class FlipDeskPanel extends PluginPanel
 
     void setLoading()
     {
-        status.setText("Updating market… (first load can take up to 30 seconds)");
+        setLabelText(status, "Updating market… (first load can take up to 30s)");
         refreshButton.setEnabled(false);
     }
 
     void setError(String message)
     {
         status.setForeground(PROFIT_RED);
-        status.setText("Update failed. " + (message == null ? "" : message));
+        setLabelText(status, "Update failed. " + (message == null ? "" : message));
         refreshButton.setEnabled(true);
     }
 
@@ -195,9 +250,9 @@ final class FlipDeskPanel extends PluginPanel
         List<FlipOpportunity> rows = opportunities == null ? Collections.emptyList() : opportunities;
         String labelText = sortLabel == null || sortLabel.isEmpty() ? "total profit" : sortLabel;
         status.setForeground(SECONDARY_TEXT);
-        status.setText(rows.isEmpty()
+        setLabelText(status, rows.isEmpty()
             ? "No flips matched. Lower Minimum flip profit, raise GP on hand, or try More flips."
-            : "Top " + rows.size() + " flips sorted by " + labelText + " (scroll for more)");
+            : "Top " + rows.size() + " flips by " + labelText + " (scroll for more)");
 
         int rank = 1;
         for (FlipOpportunity flip : rows)
@@ -215,9 +270,9 @@ final class FlipDeskPanel extends PluginPanel
         List<PositionStore.Position> history,
         long cumulativeProfit)
     {
-        totalProfit.setText("Total profit: " + gp(cumulativeProfit));
+        setLabelText(totalProfit, "Total profit: " + gp(cumulativeProfit));
         totalProfit.setForeground(profitColor(cumulativeProfit));
-        activeSummary.setText(active == null || active.isEmpty()
+        setLabelText(activeSummary, active == null || active.isEmpty()
             ? "No active flips"
             : active.size() + " active flip" + (active.size() == 1 ? "" : "s") + " (scroll for more)");
 
@@ -235,24 +290,114 @@ final class FlipDeskPanel extends PluginPanel
             }
         }
 
+        activeResults.revalidate();
+        activeResults.repaint();
+
+        lastHistory = history == null
+            ? Collections.emptyList()
+            : new ArrayList<>(history);
+        renderHistory();
+    }
+
+    private void renderHistory()
+    {
         historyResults.removeAll();
-        if (history == null || history.isEmpty())
+
+        int tradeCount = lastHistory.size();
+        HistorySortMode sortMode = historySort.getSelectedItem() instanceof HistorySortMode
+            ? (HistorySortMode) historySort.getSelectedItem()
+            : HistorySortMode.MOST_RECENT;
+
+        setLabelText(historySummary, tradeCount == 0
+            ? "0 trades"
+            : NUMBER.format(tradeCount) + " trade" + (tradeCount == 1 ? "" : "s")
+                + "  •  sorted by " + sortMode.toString().toLowerCase(Locale.US));
+
+        if (tradeCount == 0)
         {
             historyResults.add(label("Completed flips will appear here.", BODY_FONT, SECONDARY_TEXT));
         }
         else
         {
-            for (PositionStore.Position p : history)
+            for (PositionStore.Position p : sortedHistoryCopy())
             {
                 historyResults.add(buildHistoryCard(p));
                 historyResults.add(Box.createRigidArea(new Dimension(0, 4)));
             }
         }
 
-        activeResults.revalidate();
-        activeResults.repaint();
         historyResults.revalidate();
         historyResults.repaint();
+    }
+
+    private void exportHistory()
+    {
+        if (lastHistory.isEmpty())
+        {
+            JOptionPane.showMessageDialog(
+                dialogParent(),
+                "No completed trades to export yet.",
+                "Export history",
+                JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        String stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss", Locale.US));
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle("Export flip history");
+        chooser.setSelectedFile(new java.io.File("osrs-flip-desk-history-" + stamp + ".csv"));
+        chooser.setFileFilter(new FileNameExtensionFilter("CSV (Excel)", "csv"));
+
+        if (chooser.showSaveDialog(dialogParent()) != JFileChooser.APPROVE_OPTION)
+        {
+            return;
+        }
+
+        Path path = chooser.getSelectedFile().toPath();
+        if (!path.getFileName().toString().toLowerCase(Locale.US).endsWith(".csv"))
+        {
+            path = path.resolveSibling(path.getFileName().toString() + ".csv");
+        }
+
+        try
+        {
+            List<PositionStore.Position> rows = sortedHistoryCopy();
+            HistoryExport.writeCsv(path, rows);
+            JOptionPane.showMessageDialog(
+                dialogParent(),
+                "Exported " + NUMBER.format(rows.size()) + " trade"
+                    + (rows.size() == 1 ? "" : "s") + " to:\n" + path,
+                "Export history",
+                JOptionPane.INFORMATION_MESSAGE);
+        }
+        catch (Exception ex)
+        {
+            JOptionPane.showMessageDialog(
+                dialogParent(),
+                "Export failed:\n" + ex.getMessage(),
+                "Export history",
+                JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private List<PositionStore.Position> sortedHistoryCopy()
+    {
+        List<PositionStore.Position> rows = new ArrayList<>(lastHistory);
+        HistorySortMode sortMode = historySort.getSelectedItem() instanceof HistorySortMode
+            ? (HistorySortMode) historySort.getSelectedItem()
+            : HistorySortMode.MOST_RECENT;
+
+        if (sortMode == HistorySortMode.MOST_PROFITABLE)
+        {
+            rows.sort(
+                Comparator.comparingLong((PositionStore.Position p) -> p.realizedProfit).reversed()
+                    .thenComparing(Comparator.comparingLong((PositionStore.Position p) -> p.closedAt).reversed()));
+        }
+        else
+        {
+            rows.sort(Comparator.comparingLong((PositionStore.Position p) -> p.closedAt).reversed());
+        }
+        return rows;
     }
 
     private JPanel buildOpportunityCard(int rank, FlipOpportunity f)
@@ -277,22 +422,26 @@ final class FlipDeskPanel extends PluginPanel
         card.add(label(
             "~" + gp(f.totalProfit) + "  •  "
                 + NUMBER.format(f.quantity) + " qty  •  "
-                + gp(capital) + " in  •  "
                 + String.format(Locale.US, "%.2f%% ROI", f.roi),
             BODY_BOLD,
             profitColor(f.totalProfit)));
+        card.add(label(
+            gp(capital) + " capital in",
+            META_FONT,
+            MUTED_TEXT));
 
         String limitText = f.remainingBuyLimit < f.buyLimit
-            ? "Limit " + NUMBER.format(f.remainingBuyLimit) + "/" + NUMBER.format(f.buyLimit) + " left"
+            ? "Limit " + NUMBER.format(f.remainingBuyLimit) + "/" + NUMBER.format(f.buyLimit)
             : "Limit " + NUMBER.format(f.buyLimit);
         card.add(label(
-            limitText + "  •  "
-                + f.confidence + "% conf  •  "
-                + NUMBER.format(f.volume5m) + " vol  •  "
-                + f.quoteAgeSeconds + "s"
-                + (f.learnedFills > 0 ? "  •  " + f.learnedFills + " fills" : ""),
+            limitText + "  •  " + f.confidence + "% conf",
             META_FONT,
             f.remainingBuyLimit < f.buyLimit ? new Color(255, 196, 120) : SECONDARY_TEXT));
+        card.add(label(
+            NUMBER.format(f.volume5m) + " vol  •  " + f.quoteAgeSeconds + "s"
+                + (f.learnedFills > 0 ? "  •  " + f.learnedFills + " fills" : ""),
+            META_FONT,
+            MUTED_TEXT));
 
         return card;
     }
@@ -304,8 +453,10 @@ final class FlipDeskPanel extends PluginPanel
         JPanel header = new JPanel(new BorderLayout(6, 0));
         header.setOpaque(false);
         header.setAlignmentX(LEFT_ALIGNMENT);
-        header.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-        header.add(label(nullToEmpty(p.itemName), HEADING_FONT, Color.WHITE), BorderLayout.CENTER);
+        // Don't lock height — item names + Remove share a narrow row and must be allowed to grow.
+        JLabel nameLabel = wrapLabel(nullToEmpty(p.itemName), HEADING_FONT, Color.WHITE, WRAP_WIDTH_NARROW);
+        nameLabel.setToolTipText(nullToEmpty(p.itemName));
+        header.add(nameLabel, BorderLayout.CENTER);
 
         JButton removeButton = new JButton("Remove");
         removeButton.setFont(BUTTON_FONT);
@@ -324,6 +475,7 @@ final class FlipDeskPanel extends PluginPanel
             }
         });
         header.add(removeButton, BorderLayout.EAST);
+        header.setMaximumSize(new Dimension(Integer.MAX_VALUE, Math.max(28, header.getPreferredSize().height)));
         card.add(header);
 
         card.add(label(
@@ -340,21 +492,37 @@ final class FlipDeskPanel extends PluginPanel
                 ? PROFIT_RED
                 : (remainingLimit < buyLimit ? new Color(255, 196, 120) : SECONDARY_TEXT);
             String limitLabel = remainingLimit <= 0
-                ? "Buy limit reached (0/" + NUMBER.format(buyLimit) + ")"
-                : "Buy limit " + NUMBER.format(remainingLimit) + "/" + NUMBER.format(buyLimit) + " left";
+                ? "Limit hit (0/" + NUMBER.format(buyLimit) + ")"
+                : "Limit " + NUMBER.format(remainingLimit) + "/" + NUMBER.format(buyLimit);
             card.add(label(limitLabel, META_FONT, limitColor));
         }
 
-        card.add(label(
-            "Buy " + gp(p.averageBuyPrice) + "  →  Sell " + gp(p.recommendedSellPrice),
+        int breakEvenSell = MarketClient.breakEvenSellPrice(p.averageBuyPrice);
+        JLabel pricesLabel = label(
+            "Buy " + gp(p.averageBuyPrice) + " → Sell " + gp(p.recommendedSellPrice),
             BODY_BOLD,
-            Color.WHITE));
+            Color.WHITE);
+        if (breakEvenSell > 0)
+        {
+            pricesLabel.setToolTipText("Break-even sell after tax: " + gp(breakEvenSell));
+        }
+        card.add(pricesLabel);
+
+        if (breakEvenSell > 0 && p.recommendedSellPrice > 0 && p.recommendedSellPrice < breakEvenSell)
+        {
+            card.add(label(
+                "Underwater — sell ≥ " + gp(breakEvenSell),
+                META_FONT,
+                PROFIT_RED));
+        }
 
         long unrealizedEstimate = 0L;
         if (p.recommendedSellPrice > 0 && p.quantityRemaining > 0)
         {
-            int netPer = p.recommendedSellPrice - p.averageBuyPrice - MarketClient.geTax(p.recommendedSellPrice);
-            unrealizedEstimate = (long) netPer * p.quantityRemaining;
+            long remainingCost = PositionStore.remainingBuyCost(p);
+            long gross = (long) p.recommendedSellPrice * p.quantityRemaining;
+            long tax = (long) MarketClient.geTax(p.recommendedSellPrice) * p.quantityRemaining;
+            unrealizedEstimate = gross - tax - remainingCost;
         }
 
         card.add(label(
@@ -487,18 +655,55 @@ final class FlipDeskPanel extends PluginPanel
         catch (NumberFormatException ex)
         {
             status.setForeground(PROFIT_RED);
-            status.setText("Enter GP as a whole number, e.g. 50,000,000.");
+            setLabelText(status, "Enter GP as a whole number, e.g. 50,000,000.");
             return false;
         }
     }
 
-    private static JLabel label(String text, Font font, Color color)
+    private static void setLabelText(JLabel label, String text)
+    {
+        setLabelText(label, text, WRAP_WIDTH);
+    }
+
+    private static void setLabelText(JLabel label, String text, int widthPx)
+    {
+        label.setText(htmlWrap(text, widthPx));
+    }
+
+    /** Non-wrapping label for tight control rows (e.g. Sort + combo). */
+    private static JLabel plainLabel(String text, Font font, Color color)
     {
         JLabel label = new JLabel(text == null ? "" : text);
         label.setFont(font);
         label.setForeground(color);
         label.setAlignmentX(LEFT_ALIGNMENT);
         return label;
+    }
+
+    private static JLabel label(String text, Font font, Color color)
+    {
+        return wrapLabel(text, font, color, WRAP_WIDTH);
+    }
+
+    private static JLabel wrapLabel(String text, Font font, Color color, int widthPx)
+    {
+        JLabel label = new JLabel();
+        label.setFont(font);
+        label.setForeground(color);
+        label.setAlignmentX(LEFT_ALIGNMENT);
+        setLabelText(label, text, widthPx);
+        return label;
+    }
+
+    private static String htmlWrap(String text, int widthPx)
+    {
+        String raw = text == null ? "" : text;
+        String escaped = raw
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;");
+        // Keep below the visible sidebar column or trailing glyphs clip.
+        return "<html><body style='width:" + Math.max(80, widthPx) + "px'>" + escaped + "</body></html>";
     }
 
     private static Color profitColor(long value)

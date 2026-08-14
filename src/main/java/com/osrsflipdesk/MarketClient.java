@@ -165,6 +165,14 @@ final class MarketClient
                 continue;
             }
 
+            // Patient book must still clear GE tax — rejects inverted / tax-eaten spreads.
+            int patientTax = geTax(patientSell);
+            int patientProfitPerItem = patientSell - patientBuy - patientTax;
+            if (patientProfitPerItem <= 0)
+            {
+                continue;
+            }
+
             int competitiveBuy = (int) Math.ceil(patientBuy * (1.0 + buyPremiumPct / 100.0));
             int competitiveSell = (int) Math.floor(patientSell * (1.0 - sellMarkdownPct / 100.0));
 
@@ -232,10 +240,21 @@ final class MarketClient
             double spreadBonus = Math.min(0.15, Math.max(0.0, spreadPct - minSpreadPercent) / 100.0);
             double limitPressure = 1.0 - (remainingLimit / (double) limit);
             double limitPenalty = Math.min(0.20, Math.max(0.0, limitPressure - 0.5) * 0.4);
+            // Wide/fantasy books (huge ROI or spread) fill poorly — soft-penalize confidence.
+            double fantasyPenalty = 0.0;
+            if (spreadPct > 12.0)
+            {
+                fantasyPenalty += Math.min(0.15, (spreadPct - 12.0) / 80.0);
+            }
+            if (roi > 15.0)
+            {
+                fantasyPenalty += Math.min(0.15, (roi - 15.0) / 100.0);
+            }
 
             int confidence = (int) Math.round(100.0 * Math.max(0.0, Math.min(
                 1.0,
-                0.40 * freshness + 0.40 * liquidity + 0.10 + spreadBonus - impactPenalty - limitPenalty)));
+                0.40 * freshness + 0.40 * liquidity + 0.10 + spreadBonus
+                    - impactPenalty - limitPenalty - fantasyPenalty)));
 
             MarketSnapshot snap = new MarketSnapshot();
             snap.itemId = itemId;
@@ -330,6 +349,38 @@ final class MarketClient
     static int geTax(int sellPrice)
     {
         return Math.min(5_000_000, (int) Math.floor(sellPrice * 0.02));
+    }
+
+    /**
+     * Lowest sell price where {@code sell - geTax(sell) >= buyPrice}.
+     */
+    static int breakEvenSellPrice(int buyPrice)
+    {
+        if (buyPrice <= 0)
+        {
+            return 0;
+        }
+
+        // Below the 5M tax cap, net ≈ 98% of sell.
+        int guess = (int) Math.ceil(buyPrice / 0.98);
+        if (guess < buyPrice)
+        {
+            guess = buyPrice;
+        }
+
+        // Cap region: tax is flat 5M, so need sell >= buy + 5M.
+        int cappedFloor = buyPrice + 5_000_000;
+        if (guess >= 250_000_000)
+        {
+            guess = Math.max(guess, cappedFloor);
+        }
+
+        int guard = 0;
+        while (guess - geTax(guess) < buyPrice && guard++ < 10_000_000)
+        {
+            guess++;
+        }
+        return guess;
     }
 
     static final class MarketSnapshot

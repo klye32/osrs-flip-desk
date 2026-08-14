@@ -5,8 +5,8 @@ public enum FlipStrictness
     MORE_FLIPS(
         "More flips",
         30,
-        0.2,
-        0.3,
+        0.8,
+        0.5,
         120,
         10,
         0.45,
@@ -14,8 +14,8 @@ public enum FlipStrictness
     BALANCED(
         "Balanced",
         60,
-        0.3,
-        0.5,
+        1.0,
+        0.8,
         90,
         8,
         0.65,
@@ -23,8 +23,8 @@ public enum FlipStrictness
     SAFER(
         "Safer fills",
         120,
-        0.5,
-        0.8,
+        1.5,
+        1.2,
         60,
         5,
         0.90,

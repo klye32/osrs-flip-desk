@@ -7,9 +7,25 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+- History tab sort: Most recent or Most profitable
+- History tab trade count summary
+- Export completed trade history as CSV (Excel-friendly) from the History tab
+- Active flip break-even sell price (after GE tax), with a warning when the target is underwater
+
+### Changed
+- Stricter post-tax ROI / spread floors (More flips / Balanced / Safer fills)
+- Recommendations require the patient buy/sell book to clear GE tax
+- Wide or fantasy-looking spreads soft-penalize fill confidence
+
 ### Fixed
 - Mouse wheel scrolling in Flips / Active / History (nested PluginPanel scroll panes were eating wheel events)
 - Remove / Clear active confirmation dialogs opening clipped off-screen (now parented to the main RuneLite window)
+- Realized profit now uses average cost basis from total buy cost (not rounded avg price), so history matches GE tax math
+- Active tab labels wrapping / clipping in the narrow sidebar (long break-even and name+Remove rows)
+- Flips status / summary labels also wrapping (they were still plain single-line setText)
+- Sidebar wrap width accounts for scrollbar + card padding so trailing characters are not clipped
+- History Sort dropdown squeezed empty by a full-width wrapped "Sort" label
 
 ## [1.1.0] — 2026-08-08
 

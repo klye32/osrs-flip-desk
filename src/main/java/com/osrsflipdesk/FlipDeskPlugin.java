@@ -45,6 +45,8 @@ public class FlipDeskPlugin extends Plugin
     private static final Logger log = LoggerFactory.getLogger(FlipDeskPlugin.class);
     private static final long REFRESH_TIMEOUT_SECONDS = 90L;
     private static final NumberFormat NUMBER = NumberFormat.getIntegerInstance(Locale.US);
+    /** Shown in tray notification body; Windows title is always RuneLite (API limitation). */
+    private static final String NOTIFY_PREFIX = "OSRS Flip Desk";
 
     @Inject
     private Notifier notifier;
@@ -240,7 +242,7 @@ public class FlipDeskPlugin extends Plugin
         {
             if (notifier != null)
             {
-                notifier.notify("Flip Desk: both buy and sell fill notifications are disabled.");
+                notifier.notify(NOTIFY_PREFIX + ": both buy and sell fill notifications are disabled.");
             }
             return;
         }
@@ -249,14 +251,14 @@ public class FlipDeskPlugin extends Plugin
         {
             notifier.notify(
                 buyNotification,
-                "Flip Desk: Bought 1,000 Test Item @ 150 ea (test)");
+                NOTIFY_PREFIX + ": Bought 1,000 Test Item @ 150 ea (test)");
         }
 
         if (sellEnabled)
         {
             notifier.notify(
                 sellNotification,
-                "Flip Desk: Sold 1,000 Test Item @ 175 ea (+25,000 gp) (test)");
+                NOTIFY_PREFIX + ": Sold 1,000 Test Item @ 175 ea (+25,000 gp) (test)");
         }
     }
 
@@ -727,7 +729,7 @@ public class FlipDeskPlugin extends Plugin
         String name = marketClient.getItemName(itemId);
         notifier.notify(
             notification,
-            "Flip Desk: Bought "
+            NOTIFY_PREFIX + ": Bought "
                 + NUMBER.format(quantity)
                 + " "
                 + name
@@ -750,7 +752,7 @@ public class FlipDeskPlugin extends Plugin
             : NUMBER.format(realizedProfit) + " gp";
         notifier.notify(
             notification,
-            "Flip Desk: Sold "
+            NOTIFY_PREFIX + ": Sold "
                 + NUMBER.format(quantity)
                 + " "
                 + name

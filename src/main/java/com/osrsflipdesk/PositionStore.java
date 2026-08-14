@@ -172,12 +172,14 @@ final class PositionStore
             }
 
             int matched = Math.min(remainingToAllocate, p.quantityRemaining);
-            int taxPerItem = MarketClient.geTax(executionPrice);
-            long profit = (long) (executionPrice - p.averageBuyPrice - taxPerItem) * matched;
+            long costBasis = allocateBuyCost(p, matched);
+            long gross = (long) executionPrice * matched;
+            long tax = (long) MarketClient.geTax(executionPrice) * matched;
+            long profit = gross - tax - costBasis;
 
             p.quantitySold += matched;
             p.quantityRemaining -= matched;
-            p.totalSellRevenue += (long) executionPrice * matched;
+            p.totalSellRevenue += gross;
             p.realizedProfit += profit;
             p.lastSellPrice = executionPrice;
             realizedThisEvent += profit;
@@ -246,6 +248,38 @@ final class PositionStore
     private void writeList(String key, List<Position> positions)
     {
         configManager.setConfiguration(GROUP, key, gson.toJson(positions));
+    }
+
+    /**
+     * Average-cost basis for {@code matched} units still held.
+     * On the final lot of a position, uses residual cost so allocations sum to {@code totalBuyCost}.
+     */
+    private static long allocateBuyCost(Position p, int matched)
+    {
+        if (matched <= 0 || p.quantityBought <= 0)
+        {
+            return 0L;
+        }
+
+        if (matched >= p.quantityRemaining)
+        {
+            long previouslyAllocated = p.quantitySold <= 0
+                ? 0L
+                : (p.totalBuyCost * (long) p.quantitySold) / p.quantityBought;
+            return p.totalBuyCost - previouslyAllocated;
+        }
+
+        return (p.totalBuyCost * (long) matched) / p.quantityBought;
+    }
+
+    /** Remaining inventory cost basis for unrealized P&amp;L estimates. */
+    static long remainingBuyCost(Position p)
+    {
+        if (p == null || p.quantityRemaining <= 0 || p.quantityBought <= 0)
+        {
+            return 0L;
+        }
+        return allocateBuyCost(p, p.quantityRemaining);
     }
 
     private static Position copyOf(Position p)
