@@ -19,6 +19,7 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Wide or fantasy-looking spreads soft-penalize fill confidence
 
 ### Fixed
+- Use RuneLite's injected OkHttpClient for wiki price requests (`java.net.http` is not allowed on Plugin Hub)
 - Mouse wheel scrolling in Flips / Active / History (nested PluginPanel scroll panes were eating wheel events)
 - Remove / Clear active confirmation dialogs opening clipped off-screen (now parented to the main RuneLite window)
 - Realized profit now uses average cost basis from total buy cost (not rounded avg price), so history matches GE tax math

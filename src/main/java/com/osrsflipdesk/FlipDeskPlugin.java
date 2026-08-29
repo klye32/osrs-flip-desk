@@ -64,6 +64,9 @@ public class FlipDeskPlugin extends Plugin
     private Gson gson;
 
     @Inject
+    private MarketClient marketClient;
+
+    @Inject
     private ScheduledExecutorService executor;
 
     private final AtomicBoolean refreshing = new AtomicBoolean(false);
@@ -73,7 +76,6 @@ public class FlipDeskPlugin extends Plugin
 
     private FlipDeskPanel panel;
     private NavigationButton navigationButton;
-    private MarketClient marketClient;
     private LearningStore learningStore;
     private PositionStore positionStore;
     private BuyLimitStore buyLimitStore;
@@ -91,7 +93,6 @@ public class FlipDeskPlugin extends Plugin
     @Override
     protected void startUp()
     {
-        marketClient = new MarketClient(gson);
         learningStore = new LearningStore(configManager);
         positionStore = new PositionStore(configManager, gson);
         buyLimitStore = new BuyLimitStore(configManager, gson);
