@@ -1,20 +1,23 @@
 package com.osrsflipdesk;
 
 import com.google.gson.Gson;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import javax.inject.Inject;
+import javax.inject.Singleton;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+@Singleton
 final class MarketClient
 {
     private static final Logger log = LoggerFactory.getLogger(MarketClient.class);
@@ -22,18 +25,17 @@ final class MarketClient
     static final String BASE = "https://prices.runescape.wiki/api/v1/osrs";
     private static final String USER_AGENT = "OSRSFlipDesk-Runelite/1.0 - personal GE analytics plugin";
 
-    private static final HttpClient HTTP = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(10))
-        .build();
-
     private final Gson gson;
+    private final OkHttpClient httpClient;
     private final Map<Integer, MappingItem> mapping = new HashMap<>();
     private final Map<Integer, MarketSnapshot> snapshots = new ConcurrentHashMap<>();
     private volatile double activeSellMarkdownPct = 0.75;
 
-    MarketClient(Gson gson)
+    @Inject
+    MarketClient(Gson gson, OkHttpClient httpClient)
     {
         this.gson = gson;
+        this.httpClient = httpClient;
     }
 
     synchronized MarketSnapshot getSnapshot(int itemId)
@@ -327,23 +329,25 @@ final class MarketClient
         log.debug("Loaded {} mapped items", mapping.size());
     }
 
-    private <T> T getJson(String path, Class<T> type) throws Exception
+    private <T> T getJson(String path, Class<T> type) throws IOException
     {
-        HttpRequest request = HttpRequest.newBuilder()
-            .uri(URI.create(BASE + path))
-            .timeout(Duration.ofSeconds(20))
+        Request request = new Request.Builder()
+            .url(BASE + path)
             .header("Accept", "application/json")
             .header("User-Agent", USER_AGENT)
-            .GET()
+            .get()
             .build();
 
-        HttpResponse<String> response = HTTP.send(request, HttpResponse.BodyHandlers.ofString());
-        if (response.statusCode() < 200 || response.statusCode() >= 300)
+        try (Response response = httpClient.newCall(request).execute())
         {
-            throw new IllegalStateException("Market API returned HTTP " + response.statusCode());
-        }
+            ResponseBody body = response.body();
+            if (!response.isSuccessful() || body == null)
+            {
+                throw new IOException("Market API returned HTTP " + response.code());
+            }
 
-        return gson.fromJson(response.body(), type);
+            return gson.fromJson(body.string(), type);
+        }
     }
 
     static int geTax(int sellPrice)
